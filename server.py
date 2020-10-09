@@ -6,77 +6,58 @@ import threading
 from datetime import datetime
 import json
 
-run = True
 clients_lock = threading.Lock()
 connected = 0
 
 clients = {}
-clientIds = []
-
-def str_int_addr(address:str):
-   splitaddr = address.split(',')
-
-   a1 = splitaddr[0]
-   a1 = a1.replace(" ","")
-   a1 = a1.replace("(","")
-   a1 = a1.replace("'","")
-
-   a2 = splitaddr[1]
-   a2 = a2.replace(" ","")
-   a2 = a2.replace(")","")
-   a2 = int(a2)
-
-   return (a1,a2)
+clientList = []
+droppedClients = []
 
 def connectionLoop(sock):
-   global run
-   global clientIds
-
-   while run:
+   global clientList
+   while True:
       data, addr = sock.recvfrom(1024)
-
       data = str(data)
       if addr in clients:
          if 'heartbeat' in data:
             clients[addr]['lastBeat'] = datetime.now()
       else:
          if 'connect' in data:
-            clientIds.append(str(addr))
             clients[addr] = {}
             clients[addr]['lastBeat'] = datetime.now()
             clients[addr]['color'] = 0
-            
-            clientlist = {"list of all current players":clientIds}
-            l = json.dumps(clientlist)
-            cur = str_int_addr(str(addr))
-            sock.sendto(bytes(l,'utf8'),cur)
-
-            message = {"cmd": 0,"player":{"id":str(addr)}}
-            m = json.dumps(message)
+            clientList.append(str(addr))
+            msg = {"cmd": 0," new player has arrived":{'id':str(addr)}}
+            fullMsg = {"cmd": 0,"list of current players:":clientList}
             for c in clients:
+               if c == addr:
+                  m = json.dumps(fullMsg)
+               else:
+                  m = json.dumps(msg)
                sock.sendto(bytes(m,'utf8'), (c[0],c[1]))
-                           
+
 def cleanClients(sock):
-   global run
-   while run:
+   global droppedClients
+   while True:
       for c in list(clients.keys()):
          if (datetime.now() - clients[c]['lastBeat']).total_seconds() > 5:
             print('Dropped Client: ', c)
             clients_lock.acquire()
-            information = {"This client has been dropped":c}
-            i = json.dumps(information)
-            for cl in clients:
-               sock.sendto(bytes(i,'utf8'), (cl[0],cl[1]))
             del clients[c]
-            clients_lock.release()           
+            clients_lock.release()
+            droppedClients.append(str(c))
+      message = {"cmd": 2, "Players have just disconnected": droppedClients}
+      m = json.dumps(message)
+      if len(droppedClients) > 0:
+         for c in clients:
+            sock.sendto(bytes(m, 'utf8'), (c[0], c[1]))
       time.sleep(1)
 
 def gameLoop(sock):
-   global run
-   while run:
+   while True:
       GameState = {"cmd": 1, "players": []}
       clients_lock.acquire()
-      print (clients)
+      print(clients)
       for c in clients:
          player = {}
          clients[c]['color'] = {"R": random.random(), "G": random.random(), "B": random.random()}
@@ -91,14 +72,13 @@ def gameLoop(sock):
       time.sleep(1)
 
 def main():
-   global run
    port = 12345
    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
    s.bind(('', port))
-   start_new_thread(gameLoop, (s,))
-   start_new_thread(connectionLoop, (s,))
-   start_new_thread(cleanClients,(s,))
-   while run:
+   start_new_thread(gameLoop, (s, ))
+   start_new_thread(connectionLoop, (s, ))
+   start_new_thread(cleanClients,(s, ))
+   while True:
       time.sleep(1)
 
 if __name__ == '__main__':
